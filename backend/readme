@@ -1,0 +1,10 @@
+To run server.js -->
+cd supervisor-monitor/backend
+npm start
+
+Should see:
+Server listening on http://localhost:3000
+
+Open http://localhost:3000/ in the browser → your existing UI should load (still working as before, because we haven’t touched the JS yet).
+
+Open http://localhost:3000/api/active-calls → you should see the JSON array.
