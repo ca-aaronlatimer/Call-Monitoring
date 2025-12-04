@@ -1,0 +1,1040 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Supervisor Call Monitor Demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Bootstrap 5 CSS -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+    integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+    crossorigin="anonymous"
+  >
+
+  <style>
+    /* Dracula theme based on https://bootstrappretty.dev/palettes/dracula/ */
+
+    body {
+      background-color: #282a36;   /* bs-body-bg */
+      color: #f8f8f2;              /* bs-body-color */
+    }
+
+    .navbar,
+    .card {
+      background-color: #343746;   /* panel / card bg from palette */
+      border-color: #454158;       /* bs-border-color */
+    }
+
+    .table thead th {
+      border-bottom-color: #454158;
+      color: #f8f8f2;
+    }
+
+    .table tbody tr {
+      border-color: #454158;
+    }
+
+    .text-soft {
+      color: #9494b8;              /* muted text from palette */
+    }
+
+    .clickable-row {
+      cursor: pointer;
+    }
+
+    /* Optional nice hover to match Dracula palette */
+    .clickable-row:hover {
+      background-color: #3b3e4f !important;
+    }
+
+    /* -------- Status badges (mapped to palette roles) -------- */
+
+    /* Active -> success (#50fa7b) */
+    .badge-status-active {
+      background-color: #50fa7b;
+      color: #282a36;
+    }
+
+    /* Starting -> primary (#bd93f9) */
+    .badge-status-starting {
+      background-color: #bd93f9;
+      color: #282a36;
+    }
+
+    /* Ending -> warning (#ffb86c) */
+    .badge-status-ending {
+      background-color: #ffb86c;
+      color: #282a36;
+    }
+
+    /* Ended -> neutral / border-ish color */
+    .badge-status-ended {
+      background-color: #6272a4;
+      color: #f8f8f2;
+    }
+
+    /* Monitoring -> info (#8be9fd) */
+    .badge-monitoring {
+      background-color: #8be9fd;
+      color: #282a36;
+    }
+
+    /* -------- Buttons tuned to the same palette -------- */
+
+    .btn-outline-success {
+      border-color: #50fa7b;
+      color: #50fa7b;
+    }
+    .btn-outline-success:hover {
+      background-color: #50fa7b;
+      color: #282a36;
+    }
+
+    .btn-outline-danger {
+      border-color: #ff5555;
+      color: #ff5555;
+    }
+    .btn-outline-danger:hover {
+      background-color: #ff5555;
+      color: #282a36;
+    }
+
+    .btn-outline-secondary {
+      border-color: #6272a4;
+      color: #6272a4;
+    }
+    .btn-outline-secondary:hover {
+      background-color: #6272a4;
+      color: #282a36;
+    }
+
+    .btn-outline-light {
+      border-color: #f8f8f2;
+      color: #f8f8f2;
+    }
+    .btn-outline-light:hover {
+      background-color: #f8f8f2;
+      color: #282a36;
+    }
+
+    /* ---------- Simple login view layout ---------- */
+
+    #loginView {
+      min-height: 100vh;
+      display: none; /* shown when not authenticated */
+      align-items: center;
+      justify-content: center;
+    }
+
+    #appShell {
+      display: none; /* shown when authenticated */
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Login screen (simulated auth) -->
+  <div id="loginView" class="container">
+    <div class="row justify-content-center">
+      <div class="col-12 col-sm-8 col-md-6 col-lg-5">
+        <div class="card shadow">
+          <div class="card-header">
+            <h5 class="mb-0 text-light">Supervisor Login</h5>
+          </div>
+          <div class="card-body">
+            <p class="small text-soft mb-3">
+              Use the demo credentials to sign in. This is a front-end only simulation;
+              you&apos;ll later replace it with a real API call.
+            </p>
+            <form id="loginForm">
+              <div class="mb-3">
+                <label for="loginEmail" class="form-label small text-soft">Email</label>
+                <input
+                  type="email"
+                  class="form-control form-control-sm"
+                  id="loginEmail"
+                  placeholder="supervisor@example.com"
+                  required
+                  value="supervisor@example.com"
+                >
+              </div>
+              <div class="mb-3">
+                <label for="loginPassword" class="form-label small text-soft">Password</label>
+                <input
+                  type="password"
+                  class="form-control form-control-sm"
+                  id="loginPassword"
+                  placeholder="demo123!"
+                  required
+                  value="demo123!"
+                >
+              </div>
+              <div class="d-grid gap-2">
+                <button type="submit" class="btn btn-outline-light btn-sm">
+                  Sign in
+                </button>
+              </div>
+              <div id="loginError" class="small text-danger mt-2 d-none">
+                Invalid credentials. Try <code>supervisor@example.com</code> / <code>demo123!</code>.
+              </div>
+            </form>
+          </div>
+          <div class="card-footer small text-soft">
+            Once wired to your backend, this form should call your real auth endpoint
+            and store whatever token/session you return.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- App shell (hidden until "logged in") -->
+  <div id="appShell">
+    <!-- Top nav -->
+    <nav class="navbar navbar-expand-lg navbar-dark border-bottom mb-4">
+      <div class="container-fluid">
+        <span class="navbar-brand fw-semibold">
+          Supervisor Call Monitor <span class="text-soft small">(Demo)</span>
+        </span>
+        <div class="ms-auto d-flex align-items-center gap-2">
+          <span id="currentUserLabel" class="text-soft small"></span>
+          <button class="btn btn-sm btn-outline-secondary" id="btnSignOut">
+            Sign out
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container my-3">
+      <div class="row mb-3">
+        <div class="col-12 col-lg-8 mb-3 mb-lg-0">
+          <div class="card mb-3">
+            <div class="card-body d-flex flex-wrap align-items-center gap-2">
+              <div class="me-3">
+                <div class="small text-soft">Active calls</div>
+                <div class="fs-4 fw-semibold" id="activeCallsCount">0</div>
+              </div>
+
+              <div class="vr d-none d-md-block mx-2"></div>
+
+              <div class="me-3">
+                <div class="small text-soft">Simulation</div>
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="simulationToggle" checked>
+                  <label class="form-check-label small" for="simulationToggle">
+                    Simulate events
+                  </label>
+                </div>
+              </div>
+
+              <div class="ms-auto d-flex gap-2">
+                <button class="btn btn-sm btn-outline-light" id="btnRefresh">
+                  Refresh now
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" id="btnClear">
+                  Clear all
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header py-2 d-flex align-items-center">
+              <span class="small text-soft text-uppercase">Active calls (mock data)</span>
+              <div class="ms-auto d-flex gap-2">
+                <input
+                  type="text"
+                  class="form-control form-control-sm"
+                  id="filterInput"
+                  placeholder="Filter by agent, extension, caller&hellip;"
+                >
+              </div>
+            </div>
+            <div class="card-body p-0">
+              <div class="table-responsive">
+                <table class="table table-dark table-striped align-middle mb-0">
+                  <thead class="small text-soft">
+                    <tr>
+                      <th scope="col">Agent</th>
+                      <th scope="col">Extension</th>
+                      <th scope="col">Caller</th>
+                      <th scope="col">Direction</th>
+                      <th scope="col">Started</th>
+                      <th scope="col">Duration</th>
+                      <th scope="col">Status</th>
+                      <th scope="col" class="text-end">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="callsTableBody">
+                    <!-- Rows injected here -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="card-footer small text-soft">
+              This is a front-end demo. In production, this table would be fed by your backend
+              that listens to GoTo&apos;s Call Events + Notification Channel APIs.
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-lg-4">
+          <div class="card">
+            <div class="card-header py-2 d-flex justify-content-between align-items-center">
+              <span class="small text-soft text-uppercase">Selected call</span>
+              <span id="selectedMonitoringBadge" class="badge badge-monitoring small d-none">
+                Listening
+              </span>
+            </div>
+            <div class="card-body" id="selectedCallPanel">
+              <p class="text-soft small mb-0">
+                Click a row in the table to see call details here.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Listen modal -->
+  <div class="modal fade" id="listenModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content bg-dark border-secondary">
+        <div class="modal-header">
+          <h5 class="modal-title">Start monitoring call</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="listenModalBody">
+          <!-- Filled in by JS -->
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-success btn-sm" id="listenConfirmButton">
+            Call monitor endpoint
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1080">
+    <div id="toastContainer" class="toast-container"></div>
+  </div>
+
+  <!-- Bootstrap JS bundle -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+    integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+    crossorigin="anonymous"
+  ></script>
+    <audio id="monitorAudio" src="lantern-light-bistro.mp3" loop></audio>
+
+  <script>
+    // ---------------------------------------------
+    // Simulated login / auth state
+    // ---------------------------------------------
+
+    const MOCK_USER = {
+      email: "supervisor@example.com",
+      password: "demo123!",
+      name: "Demo Supervisor"
+    };
+
+    const AUTH_STORAGE_KEY = "callMonitorAuth";
+    let isAuthenticated = false;
+    let currentUser = null;
+    let appInitialized = false;
+
+    function loadAuthFromStorage() {
+      try {
+        const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    }
+
+    function saveAuthToStorage(data) {
+      try {
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(data));
+      } catch {
+        // ignore storage errors
+      }
+    }
+
+    function clearAuth() {
+      try {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+      isAuthenticated = false;
+      currentUser = null;
+    }
+
+    function showLoginView() {
+      const loginView = document.getElementById("loginView");
+      const appShell = document.getElementById("appShell");
+      if (loginView) loginView.style.display = "flex";
+      if (appShell) appShell.style.display = "none";
+    }
+
+    function showAppShell() {
+      const loginView = document.getElementById("loginView");
+      const appShell = document.getElementById("appShell");
+      if (loginView) loginView.style.display = "none";
+      if (appShell) appShell.style.display = "block";
+
+      const label = document.getElementById("currentUserLabel");
+      if (label && currentUser) {
+        label.textContent = currentUser.name + " (" + currentUser.email + ")";
+      }
+    }
+
+    function wireLoginHandlers() {
+      const form = document.getElementById("loginForm");
+      const errorEl = document.getElementById("loginError");
+      const emailEl = document.getElementById("loginEmail");
+      const passEl = document.getElementById("loginPassword");
+
+      if (!form) return;
+
+      form.addEventListener("submit", (evt) => {
+        evt.preventDefault();
+        const email = emailEl.value.trim();
+        const password = passEl.value;
+
+        // Simulated credential check
+        if (email === MOCK_USER.email && password === MOCK_USER.password) {
+          isAuthenticated = true;
+          currentUser = { name: MOCK_USER.name, email: MOCK_USER.email };
+          saveAuthToStorage(currentUser);
+
+          if (errorEl) errorEl.classList.add("d-none");
+
+          showAppShell();
+          initDemo(); // start the app once logged in
+        } else {
+          if (errorEl) errorEl.classList.remove("d-none");
+        }
+      });
+    }
+
+    function wireSignOutHandler() {
+      const btn = document.getElementById("btnSignOut");
+      if (!btn) return;
+      btn.addEventListener("click", () => {
+        clearAuth();
+        showLoginView();
+      });
+    }
+
+    // ---------------------------------------------
+    // Simple audio cues for connect / disconnect
+    // ---------------------------------------------
+    let audioCtx = null;
+
+    function getAudioContext() {
+      if (!audioCtx) {
+        const Ctor = window.AudioContext || window.webkitAudioContext;
+        if (!Ctor) return null;
+        audioCtx = new Ctor();
+      }
+      if (audioCtx.state === "suspended") {
+        audioCtx.resume();
+      }
+      return audioCtx;
+    }
+
+    function playBeep(frequency, durationMs) {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = "sine";
+      osc.frequency.value = frequency;
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      const now = ctx.currentTime;
+      const durationSec = durationMs / 1000;
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.2, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
+
+      osc.start(now);
+      osc.stop(now + durationSec + 0.05);
+    }
+
+    function playConnectSound() {
+      // Quick double-upward chirp
+      playBeep(900, 120);
+      setTimeout(() => playBeep(1200, 120), 120);
+    }
+
+    function playDisconnectSound() {
+      // Quick double-downward chirp
+      playBeep(800, 120);
+      setTimeout(() => playBeep(500, 120), 120);
+    }
+
+    // ---------------------------------------------
+    // Temporary mock "people talking" audio
+    // ---------------------------------------------
+    let monitorAudioEl = null;
+
+    function initMonitorAudio() {
+    monitorAudioEl = document.getElementById("monitorAudio");
+    }
+
+    function startMockMonitorAudio() {
+    if (!monitorAudioEl) return;
+    try {
+        monitorAudioEl.currentTime = 0;
+        monitorAudioEl.play().catch(() => {
+        // ignore autoplay errors in some browsers
+        });
+    } catch (_) {}
+    }
+
+    function stopMockMonitorAudio() {
+    if (!monitorAudioEl) return;
+    try {
+        monitorAudioEl.pause();
+        monitorAudioEl.currentTime = 0;
+    } catch (_) {}
+    }
+
+
+    // ---------------------------------------------
+    // Mock data + simulation layer
+    // ---------------------------------------------
+
+    const mockAgents = [
+      { id: "agent-1", name: "Alice Johnson",  extension: "201" },
+      { id: "agent-2", name: "Brian Smith",    extension: "202" },
+      { id: "agent-3", name: "Carla Garcia",   extension: "203" },
+      { id: "agent-4", name: "Dylan Chen",     extension: "204" },
+      { id: "agent-5", name: "Emily Davis",    extension: "205" }
+    ];
+
+    const directions = ["Inbound", "Outbound"];
+    const statuses   = ["STARTING", "ACTIVE", "ENDING", "ENDED"];
+
+    // In real life this would be fed by your backend via WebSocket / SSE
+    const activeCallsState = new Map(); // key: conversationId, value: call obj
+
+    // Monitoring state: in real backend, this would hold monitorCallId, etc.
+    const monitoringState = new Map(); // conversationId -> { startedAt, mockMonitorCallId }
+
+    // Track which conversation is currently being monitored
+    let currentMonitoringConversationId = null;
+
+    function randomPhone() {
+      const n = () => Math.floor(Math.random() * 10);
+      return "+1 (" + n() + n() + n() + ") " + n() + n() + n() + "-" + n() + n() + n() + n();
+    }
+
+    function createMockCall() {
+      const agent = mockAgents[Math.floor(Math.random() * mockAgents.length)];
+      const conversationId = "c-" + Math.random().toString(36).slice(2, 10);
+
+      const now = Date.now();
+      return {
+        conversationId,
+        agentId: agent.id,
+        agentName: agent.name,
+        agentExtension: agent.extension,
+        callerNumber: randomPhone(),
+        direction: directions[Math.floor(Math.random() * directions.length)],
+        startedAt: now - Math.floor(Math.random() * 3 * 60 * 1000), // up to 3 min ago
+        status: "ACTIVE", // treat only ACTIVE as truly "live"
+        lastUpdated: now
+      };
+    }
+
+    function simulateEventsTick() {
+      const now = Date.now();
+
+      // 1. Randomly end some calls
+      activeCallsState.forEach((call, id) => {
+        if (call.status === "ACTIVE") {
+          if (Math.random() < 0.08) { // ~8% chance per tick to end
+            call.status = "ENDED";
+            call.lastUpdated = now;
+          }
+        }
+      });
+
+      // 2. Remove ended calls after a grace period
+      activeCallsState.forEach((call, id) => {
+        if (call.status === "ENDED" && (now - call.lastUpdated) > 15000) {
+          activeCallsState.delete(id);
+          monitoringState.delete(id); // ensure monitoring stops when call vanishes
+        }
+      });
+
+      // 3. Maybe create a new call
+      if (Math.random() < 0.6) {
+        const newCall = createMockCall();
+        activeCallsState.set(newCall.conversationId, newCall);
+      }
+
+      renderActiveCalls();
+    }
+
+    let simulationIntervalId = null;
+
+    function startSimulationLoop() {
+      if (simulationIntervalId != null) return;
+      simulationIntervalId = setInterval(simulateEventsTick, 3000);
+    }
+
+    function stopSimulationLoop() {
+      if (simulationIntervalId != null) {
+        clearInterval(simulationIntervalId);
+        simulationIntervalId = null;
+      }
+    }
+
+    // ---------------------------------------------
+    // Rendering helpers
+    // ---------------------------------------------
+
+    function formatTime(date) {
+      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    }
+
+    function formatDuration(ms) {
+      const totalSeconds = Math.floor(ms / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return minutes.toString().padStart(2, "0") + ":" + seconds.toString().padStart(2, "0");
+    }
+
+    function statusBadge(status) {
+      const normalized = (status || "").toUpperCase();
+      let label = normalized;
+      let cls   = "badge-status-active";
+
+      if (normalized === "STARTING") {
+        label = "Starting";
+        cls   = "badge-status-starting";
+      } else if (normalized === "ACTIVE") {
+        label = "Active";
+        cls   = "badge-status-active";
+      } else if (normalized === "ENDING") {
+        label = "Ending";
+        cls   = "badge-status-ending";
+      } else if (normalized === "ENDED") {
+        label = "Ended";
+        cls   = "badge-status-ended";
+      }
+
+      return "<span class=\"badge " + cls + "\">" + label + "</span>";
+    }
+
+    function getFilteredSortedCalls() {
+      const filterVal = document.getElementById("filterInput").value.trim().toLowerCase();
+      const calls = Array.from(activeCallsState.values());
+
+      // Filter: by agent name, extension, caller number, direction
+      const filtered = calls.filter(call => {
+        if (!filterVal) return true;
+        const haystack = [
+          call.agentName,
+          call.agentExtension,
+          call.callerNumber,
+          call.direction
+        ].join(" ").toLowerCase();
+        return haystack.includes(filterVal);
+      });
+
+      // Sort: newest started first
+      filtered.sort((a, b) => b.startedAt - a.startedAt);
+      return filtered;
+    }
+
+    function renderActiveCalls() {
+      const tbody = document.getElementById("callsTableBody");
+      const countEl = document.getElementById("activeCallsCount");
+      const calls = getFilteredSortedCalls();
+
+      // Only count genuine live calls (ACTIVE)
+      const activeCount = calls.filter(c => c.status === "ACTIVE").length;
+      countEl.textContent = activeCount.toString();
+
+      tbody.innerHTML = "";
+
+      if (calls.length === 0) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = "<td colspan=\"8\" class=\"text-center text-soft py-3\">No calls in demo state.</td>";
+        tbody.appendChild(tr);
+        renderSelectedCall(null);
+        return;
+      }
+
+      const now = Date.now();
+
+      calls.forEach(call => {
+        const tr = document.createElement("tr");
+        tr.classList.add("clickable-row");
+        tr.dataset.conversationId = call.conversationId;
+
+        const startedDate = new Date(call.startedAt);
+        const duration = formatDuration(now - call.startedAt);
+        const isMonitoring = monitoringState.has(call.conversationId);
+        const isActive = call.status === "ACTIVE";
+
+        let actionsHtml = "";
+
+        if (isActive && !isMonitoring) {
+          actionsHtml = `
+            <button
+              class="btn btn-sm btn-outline-success btn-listen"
+              data-conversation-id="${call.conversationId}"
+            >
+              Listen
+            </button>
+          `;
+        } else if (isMonitoring) {
+          actionsHtml = `
+            <button
+              class="btn btn-sm btn-outline-danger btn-stop-listen"
+              data-conversation-id="${call.conversationId}"
+            >
+              Stop
+            </button>
+          `;
+        } else {
+          actionsHtml = `
+            <button class="btn btn-sm btn-outline-secondary" disabled>
+              Not available
+            </button>
+          `;
+        }
+
+        tr.innerHTML = [
+          "<td>" + call.agentName + "</td>",
+          "<td>" + call.agentExtension + "</td>",
+          "<td>" + call.callerNumber + "</td>",
+          "<td>" + call.direction + "</td>",
+          "<td><span class=\"small text-soft\">" + formatTime(startedDate) + "</span></td>",
+          "<td><span class=\"small\">" + duration + "</span></td>",
+          "<td>" + statusBadge(call.status) + "</td>",
+          "<td class=\"text-end\">" + actionsHtml + "</td>"
+        ].join("");
+
+        tbody.appendChild(tr);
+      });
+
+      // Re-render selected call badge if necessary
+      if (currentSelectedConversationId) {
+        const call = activeCallsState.get(currentSelectedConversationId) || null;
+        renderSelectedCall(call);
+      }
+    }
+
+    let currentSelectedConversationId = null;
+
+    function renderSelectedCall(call) {
+      const panel = document.getElementById("selectedCallPanel");
+      const badge = document.getElementById("selectedMonitoringBadge");
+
+      if (!call) {
+        panel.innerHTML = "<p class=\"text-soft small mb-0\">Click a row in the table to see call details here.</p>";
+        badge.classList.add("d-none");
+        currentSelectedConversationId = null;
+        return;
+      }
+
+      currentSelectedConversationId = call.conversationId;
+
+      const startedDate = new Date(call.startedAt);
+      const duration = formatDuration(Date.now() - call.startedAt);
+      const isMonitoring = monitoringState.has(call.conversationId);
+
+      if (isMonitoring) {
+        badge.classList.remove("d-none");
+      } else {
+        badge.classList.add("d-none");
+      }
+
+      panel.innerHTML = `
+        <div class="mb-2 d-flex justify-content-between align-items-center">
+          <div>
+            <div class="small text-soft">Agent</div>
+            <div class="fw-semibold text-light">${call.agentName} <span class="text-soft">(${call.agentExtension})</span></div>
+          </div>
+          ${isMonitoring ? "<span class=\"badge badge-monitoring\">Listening</span>" : ""}
+        </div>
+        <div class="mb-2">
+          <div class="small text-soft">Caller</div>
+          <div class="fw-semibold text-light">${call.callerNumber}</div>
+        </div>
+        <div class="row mb-2">
+          <div class="col-6">
+            <div class="small text-soft">Direction</div>
+            <div class="text-light">${call.direction}</div>
+          </div>
+          <div class="col-6">
+            <div class="small text-soft">Status</div>
+            <div>${statusBadge(call.status)}</div>
+          </div>
+        </div>
+        <div class="row mb-2">
+          <div class="col-6">
+            <div class="small text-soft">Started</div>
+            <div class="small text-light">${formatTime(startedDate)}</div>
+          </div>
+          <div class="col-6">
+            <div class="small text-soft">Duration</div>
+            <div class="small text-light">${duration}</div>
+          </div>
+        </div>
+        <div class="small text-soft">
+          Conversation ID: <code>${call.conversationId}</code>
+        </div>
+      `;
+    }
+
+    // ---------------------------------------------
+    // "Listen" / "Stop" integration points
+    // ---------------------------------------------
+
+    let listenModalInstance = null;
+    let listenTargetCall = null;
+
+    function showToast(message, variant = "success") {
+      const container = document.getElementById("toastContainer");
+      const toastEl = document.createElement("div");
+      toastEl.className = "toast align-items-center text-bg-" + variant + " border-0";
+      toastEl.role = "alert";
+      toastEl.ariaLive = "assertive";
+      toastEl.ariaAtomic = "true";
+      toastEl.innerHTML = `
+        <div class="d-flex">
+          <div class="toast-body">
+            ${message}
+          </div>
+          <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+      `;
+      container.appendChild(toastEl);
+      const bsToast = new bootstrap.Toast(toastEl, { delay: 3500 });
+      bsToast.show();
+      toastEl.addEventListener("hidden.bs.toast", () => toastEl.remove());
+    }
+
+    function openListenModal(call) {
+      listenTargetCall = call;
+
+      const body = document.getElementById("listenModalBody");
+      body.innerHTML = `
+        <p class="mb-2">You are about to start monitoring this call:</p>
+        <ul class="small mb-3">
+          <li><strong>Agent:</strong> ${call.agentName} (${call.agentExtension})</li>
+          <li><strong>Caller:</strong> ${call.callerNumber}</li>
+          <li><strong>Direction:</strong> ${call.direction}</li>
+          <li><strong>Conversation ID:</strong> <code>${call.conversationId}</code></li>
+        </ul>
+        <p class="small text-soft mb-0">
+          In production, this button would call your backend endpoint (for example:
+          <code>POST /monitor/${call.conversationId}</code>) which would then use GoTo&apos;s Devices and Calls API
+          and your monitoring dial-plan to bridge the supervisor into the call.
+        </p>
+      `;
+
+      const modalEl = document.getElementById("listenModal");
+      listenModalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
+      listenModalInstance.show();
+    }
+
+    async function callMonitorEndpoint(call) {
+        // If another call is already being monitored, stop it first
+        if (
+            currentMonitoringConversationId &&
+            currentMonitoringConversationId !== call.conversationId
+        ) {
+            const prevId = currentMonitoringConversationId;
+            const prevCall = activeCallsState.get(prevId) || null;
+
+            // Remove previous monitor session
+            monitoringState.delete(prevId);
+
+            // Stop mock audio + give a quick disconnect cue
+            stopMockMonitorAudio();
+            playDisconnectSound();
+
+            if (prevCall) {
+            showToast(
+                "Stopped monitoring " + prevCall.agentName + " (" + prevId + ")",
+                "secondary"
+            );
+            }
+        }
+
+        // In production, call your backend here:
+        // await fetch("/api/monitor/" + encodeURIComponent(call.conversationId), { method: "POST", ... });
+
+        const mockMonitorCallId = "m-" + Math.random().toString(36).slice(2, 10);
+        monitoringState.set(call.conversationId, {
+            startedAt: Date.now(),
+            mockMonitorCallId
+        });
+
+        // Mark this as the new active monitored call
+        currentMonitoringConversationId = call.conversationId;
+
+        playConnectSound();
+        startMockMonitorAudio(); // TEMP: simulate call audio
+        showToast(
+            "Monitor request sent for " + call.agentName + " (" + call.conversationId + ")",
+            "success"
+        );
+        renderActiveCalls();
+        }
+
+
+    async function stopMonitorEndpoint(call) {
+        // In production, call your backend to hang up the monitoring call:
+        //
+        // const session = monitoringState.get(call.conversationId);
+        // await fetch("/api/monitor/" + encodeURIComponent(call.conversationId) + "/stop", {
+        //   method: "POST",
+        //   headers: { "Content-Type": "application/json" },
+        //   body: JSON.stringify({ monitorCallId: session.monitorCallId })
+        // });
+
+        monitoringState.delete(call.conversationId);
+
+        if (currentMonitoringConversationId === call.conversationId) {
+            currentMonitoringConversationId = null;
+        }
+
+        stopMockMonitorAudio(); // TEMP
+        playDisconnectSound();
+        showToast(
+            "Stopped monitoring " + call.agentName + " (" + call.conversationId + ")",
+            "secondary"
+        );
+
+        renderActiveCalls();
+        }
+
+
+    // ---------------------------------------------
+    // Wire up DOM events / boot sequence
+    // ---------------------------------------------
+
+    function initDemo() {
+      if (appInitialized) return;
+      appInitialized = true;
+
+      // Seed with some mock calls
+      for (let i = 0; i < 3; i++) {
+        const c = createMockCall();
+        activeCallsState.set(c.conversationId, c);
+      }
+      renderActiveCalls();
+
+      // Simulation toggle
+      const simulationToggle = document.getElementById("simulationToggle");
+      simulationToggle.addEventListener("change", () => {
+        if (simulationToggle.checked) {
+          startSimulationLoop();
+        } else {
+          stopSimulationLoop();
+        }
+      });
+      startSimulationLoop();
+
+      // Refresh button (forces a re-render of current state)
+      document.getElementById("btnRefresh").addEventListener("click", () => {
+        renderActiveCalls();
+        showToast("Refreshed demo state", "secondary");
+      });
+
+      // Clear button
+      document.getElementById("btnClear").addEventListener("click", () => {
+        activeCallsState.clear();
+        monitoringState.clear();
+        renderActiveCalls();
+        renderSelectedCall(null);
+      });
+
+      // Filter input
+      document.getElementById("filterInput").addEventListener("input", () => {
+        renderActiveCalls();
+      });
+
+      // Table click handling (row select + listen/stop buttons)
+      document.getElementById("callsTableBody").addEventListener("click", (evt) => {
+        const listenBtn = evt.target.closest(".btn-listen");
+        const stopBtn = evt.target.closest(".btn-stop-listen");
+        const row = evt.target.closest("tr");
+
+        if (!row) return;
+        const id = row.dataset.conversationId;
+        const call = activeCallsState.get(id);
+        if (!call) return;
+
+        // Row click selects call
+        renderSelectedCall(call);
+
+        // Listen button click
+        if (listenBtn) {
+          openListenModal(call);
+          evt.stopPropagation();
+          return;
+        }
+
+        // Stop button click
+        if (stopBtn) {
+          stopMonitorEndpoint(call);
+          evt.stopPropagation();
+          return;
+        }
+      });
+
+      // Listen modal confirm button
+      document.getElementById("listenConfirmButton").addEventListener("click", async () => {
+        if (!listenTargetCall) return;
+        await callMonitorEndpoint(listenTargetCall);
+        if (listenModalInstance) {
+          listenModalInstance.hide();
+        }
+      });
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      
+        // Temp Simulation Audio
+        initMonitorAudio();
+        
+        // Wire login & sign-out
+      wireLoginHandlers();
+      wireSignOutHandler();
+
+      // Restore auth from localStorage if present
+      const stored = loadAuthFromStorage();
+      if (stored && stored.email === MOCK_USER.email) {
+        isAuthenticated = true;
+        currentUser = stored;
+        showAppShell();
+        initDemo();
+      } else {
+        showLoginView();
+      }
+    });
+  </script>
+</body>
+</html>
