@@ -1,3 +1,6 @@
+require("dotenv").config();
+const { getGoToAccessToken } = require("./gotoAuth");
+
 const express = require("express");
 const path = require("path");
 
@@ -49,6 +52,21 @@ const activeCalls = [
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
+
+app.get("/api/debug/goto-token", async (req, res) => {
+  try {
+    const token = await getGoToAccessToken();
+    res.json({
+      ok: true,
+      tokenPreview: token.slice(0, 20) + "...",
+      message: "Token fetched successfully"
+    });
+  } catch (err) {
+    console.error("Error fetching GoTo token:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 
 /**
  * Mock active-calls endpoint:
