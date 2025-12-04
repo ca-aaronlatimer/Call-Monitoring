@@ -606,6 +606,56 @@
     }
 
     // ---------------------------------------------
+    // Backend integration: load active calls
+    // ---------------------------------------------
+
+    const BACKEND_BASE_URL = ""; // empty = same origin
+
+    async function loadActiveCallsFromBackend() {
+      try {
+        const res = await fetch(BACKEND_BASE_URL + "/api/active-calls", {
+          headers: { "Accept": "application/json" }
+        });
+
+        if (!res.ok) {
+          throw new Error("Server returned " + res.status);
+        }
+
+        const data = await res.json();
+
+        // Reset current state and normalize incoming calls
+        activeCallsState.clear();
+
+        const now = Date.now();
+
+        (data || []).forEach(raw => {
+          const call = {
+            conversationId: raw.conversationId,
+            agentId: raw.agentId,
+            agentName: raw.agentName,
+            agentExtension: raw.agentExtension,
+            callerNumber: raw.callerNumber,
+            direction: raw.direction,
+            startedAt: raw.startedAt || now,
+            status: raw.status || "ACTIVE",
+            lastUpdated: raw.lastUpdated || now
+          };
+
+          activeCallsState.set(call.conversationId, call);
+        });
+
+        renderActiveCalls();
+        showToast("Loaded calls from server", "secondary");
+      } catch (err) {
+        console.error("Failed to load active calls:", err);
+        showToast("Failed to load calls from server", "danger");
+      }
+    }
+
+
+
+
+    // ---------------------------------------------
     // Rendering helpers
     // ---------------------------------------------
 
@@ -859,76 +909,129 @@
     }
 
     async function callMonitorEndpoint(call) {
-        // If another call is already being monitored, stop it first
-        if (
-            currentMonitoringConversationId &&
-            currentMonitoringConversationId !== call.conversationId
-        ) {
-            const prevId = currentMonitoringConversationId;
-            const prevCall = activeCallsState.get(prevId) || null;
+      // If another call is already being monitored, stop it first (frontend + backend)
+      if (
+        currentMonitoringConversationId &&
+        currentMonitoringConversationId !== call.conversationId
+      ) {
+        const prevId = currentMonitoringConversationId;
+        const prevCall = activeCallsState.get(prevId) || null;
 
-            // Remove previous monitor session
-            monitoringState.delete(prevId);
-
-            // Stop mock audio + give a quick disconnect cue
-            stopMockMonitorAudio();
-            playDisconnectSound();
-
-            if (prevCall) {
-            showToast(
-                "Stopped monitoring " + prevCall.agentName + " (" + prevId + ")",
-                "secondary"
-            );
-            }
+        // Tell backend to stop previous monitor (best effort)
+        try {
+          await fetch(
+            BACKEND_BASE_URL + "/api/monitor/" + encodeURIComponent(prevId) + "/stop",
+            { method: "POST" }
+          );
+        } catch (err) {
+          console.error("Failed to stop previous monitor on server:", err);
         }
 
-        // In production, call your backend here:
-        // await fetch("/api/monitor/" + encodeURIComponent(call.conversationId), { method: "POST", ... });
+        // Clear previous monitor session locally
+        monitoringState.delete(prevId);
+        stopMockMonitorAudio();
+        playDisconnectSound();
 
-        const mockMonitorCallId = "m-" + Math.random().toString(36).slice(2, 10);
+        if (prevCall) {
+          showToast(
+            "Stopped monitoring " + prevCall.agentName + " (" + prevId + ")",
+            "secondary"
+          );
+        }
+
+        currentMonitoringConversationId = null;
+      }
+
+      // Call backend to start monitoring this conversation
+      try {
+        const res = await fetch(
+          BACKEND_BASE_URL + "/api/monitor/" + encodeURIComponent(call.conversationId),
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}) // placeholder for future payload (e.g., supervisorId)
+          }
+        );
+
+        if (!res.ok) {
+          throw new Error("Server returned " + res.status);
+        }
+
+        const data = await res.json();
+
+        const mockMonitorCallId =
+          data.monitorCallId || "m-" + Math.random().toString(36).slice(2, 10);
+
         monitoringState.set(call.conversationId, {
-            startedAt: Date.now(),
-            mockMonitorCallId
+          startedAt: Date.now(),
+          mockMonitorCallId
         });
 
-        // Mark this as the new active monitored call
         currentMonitoringConversationId = call.conversationId;
 
         playConnectSound();
         startMockMonitorAudio(); // TEMP: simulate call audio
         showToast(
-            "Monitor request sent for " + call.agentName + " (" + call.conversationId + ")",
-            "success"
+          "Monitor request sent for " + call.agentName + " (" + call.conversationId + ")",
+          "success"
         );
+
         renderActiveCalls();
-        }
+      } catch (err) {
+        console.error("Failed to start monitor on server:", err);
+        showToast("Failed to start monitor for " + call.agentName, "danger");
+      }
+    }
 
 
     async function stopMonitorEndpoint(call) {
-        // In production, call your backend to hang up the monitoring call:
-        //
-        // const session = monitoringState.get(call.conversationId);
-        // await fetch("/api/monitor/" + encodeURIComponent(call.conversationId) + "/stop", {
-        //   method: "POST",
-        //   headers: { "Content-Type": "application/json" },
-        //   body: JSON.stringify({ monitorCallId: session.monitorCallId })
-        // });
+      const conversationId = call.conversationId;
 
-        monitoringState.delete(call.conversationId);
-
-        if (currentMonitoringConversationId === call.conversationId) {
-            currentMonitoringConversationId = null;
-        }
-
-        stopMockMonitorAudio(); // TEMP
-        playDisconnectSound();
-        showToast(
-            "Stopped monitoring " + call.agentName + " (" + call.conversationId + ")",
-            "secondary"
+      // Call backend to hang up the monitoring leg
+      try {
+        const res = await fetch(
+          BACKEND_BASE_URL +
+            "/api/monitor/" +
+            encodeURIComponent(conversationId) +
+            "/stop",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({})
+          }
         );
 
-        renderActiveCalls();
+        if (!res.ok) {
+          throw new Error("Server returned " + res.status);
         }
+
+        // Optional: you can read the JSON if you care
+        // const data = await res.json();
+      } catch (err) {
+        console.error("Failed to stop monitor on server:", err);
+        showToast(
+          "Failed to stop monitor for " + call.agentName + " (" + conversationId + ")",
+          "danger"
+        );
+        // We still fall through and clean up local state so UI doesn't get stuck
+      }
+
+      // Local cleanup
+      monitoringState.delete(conversationId);
+
+      if (currentMonitoringConversationId === conversationId) {
+        currentMonitoringConversationId = null;
+      }
+
+      stopMockMonitorAudio(); // TEMP
+      playDisconnectSound();
+      showToast(
+        "Stopped monitoring " + call.agentName + " (" + conversationId + ")",
+        "secondary"
+      );
+
+      renderActiveCalls();
+    }
 
 
     // ---------------------------------------------
@@ -939,23 +1042,66 @@
       if (appInitialized) return;
       appInitialized = true;
 
-      // Seed with some mock calls
-      for (let i = 0; i < 3; i++) {
-        const c = createMockCall();
-        activeCallsState.set(c.conversationId, c);
-      }
-      renderActiveCalls();
-
-      // Simulation toggle
       const simulationToggle = document.getElementById("simulationToggle");
+
+      // Initial load: simulation ON -> mock calls; OFF -> backend
+      if (simulationToggle.checked) {
+        // Seed with some mock calls
+        for (let i = 0; i < 3; i++) {
+          const c = createMockCall();
+          activeCallsState.set(c.conversationId, c);
+        }
+        renderActiveCalls();
+        startSimulationLoop();
+      } else {
+        // No simulation: load from backend
+        activeCallsState.clear();
+        loadActiveCallsFromBackend();
+      }
+
+      // Simulation toggle behavior
       simulationToggle.addEventListener("change", () => {
         if (simulationToggle.checked) {
+          // Switching TO simulation mode
+          stopSimulationLoop();
+          activeCallsState.clear();
+
+          for (let i = 0; i < 3; i++) {
+            const c = createMockCall();
+            activeCallsState.set(c.conversationId, c);
+          }
+          renderActiveCalls();
           startSimulationLoop();
         } else {
+          // Switching TO backend mode
           stopSimulationLoop();
+          activeCallsState.clear();
+          loadActiveCallsFromBackend();
         }
       });
-      startSimulationLoop();
+
+      // Refresh button (forces a re-render or backend reload)
+      document.getElementById("btnRefresh").addEventListener("click", () => {
+        if (simulationToggle.checked) {
+          renderActiveCalls();
+          showToast("Refreshed demo state", "secondary");
+        } else {
+          loadActiveCallsFromBackend();
+        }
+      });
+
+      // Clear button
+      document.getElementById("btnClear").addEventListener("click", () => {
+        activeCallsState.clear();
+        monitoringState.clear();
+        renderActiveCalls();
+        renderSelectedCall(null);
+      });
+
+      // Filter input
+      document.getElementById("filterInput").addEventListener("input", () => {
+        renderActiveCalls();
+      });
 
       // Refresh button (forces a re-render of current state)
       document.getElementById("btnRefresh").addEventListener("click", () => {

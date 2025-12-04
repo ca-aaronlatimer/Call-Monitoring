@@ -8,3 +8,5 @@ Server listening on http://localhost:3000
 Open http://localhost:3000/ in the browser → your existing UI should load (still working as before, because we haven’t touched the JS yet).
 
 Open http://localhost:3000/api/active-calls → you should see the JSON array.
+
+Once you confirm the server is running and you can see /api/active-calls in the browser:
